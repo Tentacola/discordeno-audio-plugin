@@ -4,6 +4,14 @@ import { LoadSource, UdpArgs } from "./mod.ts";
 import { QueuePlayer } from "./player/mod.ts";
 import { FRAME_DURATION } from "./sample-consts.ts";
 import { sendAudioPacket } from "./udp/packet.ts";
+import {
+    Codec,
+    DAVE_PROTOCOL_VERSION,
+    DAVESession,
+    MediaType,
+    ProposalsOperationType,
+} from "../deps.ts";
+import { SendVoiceOpcodes } from "./websocket/opcodes.ts";
 
 export type BotData = {
     botId: bigint;
@@ -16,6 +24,10 @@ export type BotData = {
 export type ConnectionData = {
     player: QueuePlayer;
     audio: ReturnType<typeof createAudioStreamer>;
+    dave: {
+        session?: DAVESession;
+        pending: Map<number, number>;
+    };
     guildId: bigint;
     udpSocket: Deno.DatagramConn;
     udpRaw: EventSource<Uint8Array>;
@@ -37,7 +49,7 @@ export type ConnectionData = {
         sessionId?: string;
         token?: string;
     };
-    stopHeart: () => void;
+    heartbeat?: NodeJS.Timeout;
     remote?: { port: number; hostname: string };
     ws?: WebSocket;
     secret?: Uint8Array;
@@ -60,7 +72,7 @@ export function createBotData(
     botId: bigint,
     udpSource: EventSource<UdpArgs>,
     loadSource: LoadSource,
-    bufferSize = 10
+    bufferSize = 10,
 ) {
     const botData: BotData = {
         botId,
@@ -73,7 +85,10 @@ export function createBotData(
     return botData;
 }
 
-export function getConnectionData(botId: bigint, guildId: bigint) {
+export function getConnectionData(
+    botId: bigint,
+    guildId: bigint,
+) {
     const botData = connectionData.get(botId);
     if (botData === undefined) {
         throw "Bot first needs to be connected!";
@@ -93,7 +108,9 @@ export function getConnectionData(botId: bigint, guildId: bigint) {
                 listening = true;
             } catch (_err) {
                 if (_err instanceof TypeError) {
-                    throw new Error("Please enable unstable by adding --unstable.");
+                    throw new Error(
+                        "Please enable unstable by adding --unstable.",
+                    );
                 }
                 currentPort++;
             }
@@ -119,14 +136,89 @@ export function getConnectionData(botId: bigint, guildId: bigint) {
             audio: createAudioStreamer(),
             ssrcToUser: new Map<number, bigint>(),
             usersToSsrc: new Map<bigint, number>(),
-            stopHeart: () => {},
+            dave: {
+                pending: new Map<number, number>(),
+            },
         };
         data.player = new QueuePlayer(data, botData.loadSource);
         botData.guildData.set(guildId, data);
-        connectSocketToSource(botData.botId, guildId, udpSocket, botData.udpSource, udpRaw);
+        connectSocketToSource(
+            botData.botId,
+            guildId,
+            udpSocket,
+            botData.udpSource,
+            udpRaw,
+        );
         connectAudioIterable(data);
     }
+
     return data;
+}
+
+export function createDaveSession(
+    botId: bigint,
+    guildId: bigint,
+    channelId: bigint,
+) {
+    const data = getConnectionData(botId, guildId);
+    data.dave.session = new DAVESession(
+        DAVE_PROTOCOL_VERSION,
+        botId.toString(),
+        channelId.toString(),
+    );
+}
+
+export function updateDaveVersion(
+    conn: ConnectionData,
+    daveProtocolVersion: number,
+) {
+    reinitDave(conn, undefined, daveProtocolVersion);
+}
+
+export function sendWS(
+    conn: ConnectionData,
+    code: SendVoiceOpcodes,
+    data: any,
+) {
+    if (conn.ws?.readyState === WebSocket.OPEN) {
+        conn.ws.send(
+            JSON.stringify({
+                op: code,
+                d: data,
+            }),
+        );
+    }
+}
+
+export function sendWSBinary(
+    conn: ConnectionData,
+    code: SendVoiceOpcodes,
+    data: any,
+) {
+    if (conn.ws?.readyState === WebSocket.OPEN) {
+        const buffer = Buffer.allocUnsafe(1 + data.length);
+        data.copy(buffer, 1);
+        buffer.writeUInt8(code);
+        conn.ws.send(buffer.subarray(0, 1 + data.length));
+    }
+}
+
+export function updateChannel(conn: ConnectionData, channelId: bigint) {
+    reinitDave(conn, channelId);
+}
+export function reinitDave(
+    conn: ConnectionData,
+    channelId?: bigint,
+    daveProtocolVersion?: number,
+) {
+    const session = conn.dave.session;
+    if (session !== undefined) {
+        session.reinit(
+            daveProtocolVersion ?? session.protocolVersion,
+            session.userId,
+            channelId?.toString() ?? session.channelId,
+        );
+    }
 }
 
 function createAudioStreamer() {
@@ -177,7 +269,7 @@ async function connectSocketToSource(
     guildId: bigint,
     socket: Deno.DatagramConn,
     source: EventSource<UdpArgs>,
-    localSource: EventSource<Uint8Array>
+    localSource: EventSource<Uint8Array>,
 ) {
     for await (const [data, _address] of socket) {
         source.trigger({ botId, guildId, data });

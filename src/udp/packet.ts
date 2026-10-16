@@ -15,7 +15,10 @@ export function stripRTP(conn: ConnectionData, packet: Uint8Array) {
         throw "Secret is not known!";
     }
 
-    const nonce = new Uint8Array([...packet.slice(0, 12), ...new Uint8Array(12)]);
+    const nonce = new Uint8Array([
+        ...packet.slice(0, 12),
+        ...new Uint8Array(12),
+    ]);
     const encrypted = packet.slice(12, packet.length);
     let data = decryptPacket(conn.secret, encrypted, nonce);
 
@@ -53,8 +56,15 @@ export async function prepPacket(conn: ConnectionData, packet: Uint8Array) {
     conn.context.nonce++;
     nonceView.setUint32(0, conn.context.nonce, false);
 
+    if (conn.dave.session.ready && conn.dave.session.protocolVersion !== 0) {
+        packet = conn.dave.session.encryptOpus(Buffer.from(packet));
+    }
     const encrypted = await encryptPacket(packet, rtp, nonce, secret);
-    return new Uint8Array([...rtp, ...new Uint8Array(encrypted), ...nonce.subarray(0, 4)]);
+    return new Uint8Array([
+        ...rtp,
+        ...new Uint8Array(encrypted),
+        ...nonce.subarray(0, 4),
+    ]);
 }
 
 export function incrementAudioMetaData(context: ConnectionData["context"]) {

@@ -4,16 +4,21 @@ import { youtubeSearch } from "../../deps.ts";
 
 const os = type() as keyof typeof ytdlp_binaries;
 const ytdlp_binaries = {
-    Windows_NT: "https://github.com/yt-dlp/yt-dlp/releases/download/2025.11.12/yt-dlp.exe",
-    Linux: "https://github.com/yt-dlp/yt-dlp/releases/download/2025.11.12/yt-dlp_linux",
+    Windows_NT: "yt-dlp.exe",
+    Linux: "yt-dlp_linux",
 };
 
 async function download_binary(binaries: any) {
-    const url = binaries[os];
-    let filename = `./${url.split("/").pop()}`;
-    if (!filename.endsWith(".exe")) {
-        filename += ".exe";
-    }
+    const urls = await fetch(
+        "https://api.github.com/repos/yt-dlp/yt-dlp/releases/latest",
+    );
+    const url_split = (await urls.json()).assets[0].browser_download_url.split(
+        "/",
+    );
+    url_split.pop();
+
+    const url = url_split.join("/") + "/" + binaries[os];
+    const filename = `./${url.split("/").pop()}`;
 
     if (!(await exists(filename))) {
         const binaryResponse = await fetch(url);
@@ -25,6 +30,20 @@ async function download_binary(binaries: any) {
             });
 
             await binaryResponse.body.pipeTo(file.writable);
+        }
+        if (os == "Linux") {
+            const chown = new Deno.Command("chmod", {
+                args: ["+x", filename],
+                stdin: "null",
+                stdout: "piped",
+                stderr: "piped",
+            });
+            const output = await chown.output();
+            if (output.code !== 0) {
+                console.log(
+                    "yt-dlp might not be executable, change that with chmod +x ./yt-dlp_linux",
+                );
+            }
         }
     }
     return filename;
@@ -50,6 +69,11 @@ if (!(await exists(temp_dir, { isDirectory: true }))) {
 
 export async function getAudioStream(id: string) {
     const temp_file = `${temp_dir}/${id}.m4a`;
+    console.log(
+        `Run: yt-dlp_linux ${
+            ["-x", "--audio-format", "m4a", "-o", temp_file, id].join(" ")
+        }`,
+    );
     const ytdlp_cmd = new Deno.Command(ytdlp, {
         args: ["-x", "--audio-format", "m4a", "-o", temp_file, id],
         stdin: "null",
