@@ -97,7 +97,7 @@ function handleClose(
     userId: bigint,
     guildId: bigint,
 ) {
-    conn.stopHeart();
+    clearInterval(conn.heartbeat);
     conn.context.ready = false;
     conn.context.speaking = false;
     conn.context.lastHeart = undefined;
