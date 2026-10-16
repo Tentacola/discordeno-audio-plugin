@@ -93,7 +93,11 @@ export async function getAudioStream(id: string) {
 
     const ffmpeg_child = ffmpeg_cmd.spawn();
     ffmpeg_child.status.then(async () => {
-        await Deno.remove(temp_file);
+        try {
+            await Deno.remove(temp_file);
+        } catch {
+            console.log("Failed to remove file");
+        }
     });
     return ffmpeg_child.stdout;
 }
