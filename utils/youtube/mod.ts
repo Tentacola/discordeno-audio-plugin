@@ -69,11 +69,6 @@ if (!(await exists(temp_dir, { isDirectory: true }))) {
 
 export async function getAudioStream(id: string) {
     const temp_file = `${temp_dir}/${id}.m4a`;
-    console.log(
-        `Run: yt-dlp_linux ${
-            ["-x", "--audio-format", "m4a", "-o", temp_file, id].join(" ")
-        }`,
-    );
     const ytdlp_cmd = new Deno.Command(ytdlp, {
         args: ["-x", "--audio-format", "m4a", "-o", temp_file, id],
         stdin: "null",
