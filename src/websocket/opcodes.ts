@@ -18,6 +18,8 @@ export enum VoiceOpcodes {
     Hello = 8,
     /** Acknowledge a successful session resume. */
     Resumed = 9,
+    /** A client has connected to the voice channel */
+    ClientConnect = 11,
     /** A client has disconnected from the voice channel */
     ClientDisconnect = 13,
     DAVE_PREPARE_TRANSITION = 21,
@@ -73,6 +75,8 @@ export enum ReceiveVoiceOpcodes {
     Hello = VoiceOpcodes.Hello,
     /** Acknowledge a successful session resume. */
     Resumed = VoiceOpcodes.Resumed,
+    /** A client has connected to the voice channel */
+    ClientConnect = VoiceOpcodes.ClientConnect,
     /** A client has disconnected from the voice channel */
     ClientDisconnect = VoiceOpcodes.ClientDisconnect,
     /** MLS_EXTERNAL_SENDER */

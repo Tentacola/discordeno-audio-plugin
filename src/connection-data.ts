@@ -4,13 +4,7 @@ import { LoadSource, UdpArgs } from "./mod.ts";
 import { QueuePlayer } from "./player/mod.ts";
 import { FRAME_DURATION } from "./sample-consts.ts";
 import { sendAudioPacket } from "./udp/packet.ts";
-import {
-    Codec,
-    DAVE_PROTOCOL_VERSION,
-    DAVESession,
-    MediaType,
-    ProposalsOperationType,
-} from "../deps.ts";
+import { DAVE_PROTOCOL_VERSION, DAVESession } from "../deps.ts";
 import { SendVoiceOpcodes } from "./websocket/opcodes.ts";
 
 export type BotData = {
@@ -28,8 +22,11 @@ export type ConnectionData = {
         session?: DAVESession;
         pending: Map<number, number>;
     };
+    clientsConnected: Set<string>;
     guildId: bigint;
-    udpSocket: Deno.DatagramConn;
+    channelId: bigint;
+    botId: bigint;
+    udpSocket?: Deno.DatagramConn;
     udpRaw: EventSource<Uint8Array>;
     ssrcToUser: Map<number, bigint>;
     usersToSsrc: Map<bigint, number>;
@@ -38,8 +35,8 @@ export type ConnectionData = {
         ready: boolean;
         speaking: boolean;
         sequence: number;
+        wsSequence: number;
         timestamp: number;
-        missedHeart: number;
         lastHeart?: number;
         reconnect: number;
         nonce: number;
@@ -85,50 +82,35 @@ export function createBotData(
     return botData;
 }
 
-export function getConnectionData(
-    botId: bigint,
-    guildId: bigint,
-) {
+export function getBotData(botId: bigint) {
     const botData = connectionData.get(botId);
     if (botData === undefined) {
         throw "Bot first needs to be connected!";
     }
+    return botData;
+}
+
+export function getConnectionData(
+    botId: bigint,
+    guildId: bigint,
+    channelId?: bigint,
+) {
+    const botData = getBotData(botId);
     let data = botData.guildData.get(guildId);
     if (data === undefined) {
-        let currentPort = 5000;
-        let listening = false;
-        let udpSocket: Deno.DatagramConn | undefined;
-        while (!listening) {
-            try {
-                udpSocket = Deno.listenDatagram({
-                    hostname: "0.0.0.0",
-                    port: currentPort,
-                    transport: "udp",
-                });
-                listening = true;
-            } catch (_err) {
-                if (_err instanceof TypeError) {
-                    throw new Error(
-                        "Please enable unstable by adding --unstable.",
-                    );
-                }
-                currentPort++;
-            }
-        }
-        udpSocket = udpSocket as Deno.DatagramConn;
         const udpRaw = new EventSource<Uint8Array>();
         data = {
             player: undefined as unknown as QueuePlayer,
             guildId,
-            udpSocket,
+            botId,
             udpRaw,
             context: {
                 ssrc: 1,
                 ready: false,
                 speaking: false,
+                wsSequence: -1,
                 sequence: randomNBit(16),
                 timestamp: randomNBit(32),
-                missedHeart: 0,
                 reconnect: 0,
                 nonce: 0,
             },
@@ -139,16 +121,11 @@ export function getConnectionData(
             dave: {
                 pending: new Map<number, number>(),
             },
+            clientsConnected: new Set(),
+            channelId: channelId!,
         };
         data.player = new QueuePlayer(data, botData.loadSource);
         botData.guildData.set(guildId, data);
-        connectSocketToSource(
-            botData.botId,
-            guildId,
-            udpSocket,
-            botData.udpSource,
-            udpRaw,
-        );
         connectAudioIterable(data);
     }
 
@@ -218,6 +195,11 @@ export function reinitDave(
             session.userId,
             channelId?.toString() ?? session.channelId,
         );
+        sendWSBinary(
+            conn,
+            SendVoiceOpcodes.MLS_KEY_PACKAGE,
+            session?.getSerializedKeyPackage(),
+        );
     }
 }
 
@@ -264,7 +246,7 @@ export function setUserSSRC(conn: ConnectionData, user: bigint, ssrc: number) {
     conn.ssrcToUser.set(ssrc, user);
 }
 
-async function connectSocketToSource(
+export async function connectSocketToSource(
     botId: bigint,
     guildId: bigint,
     socket: Deno.DatagramConn,

@@ -17,6 +17,7 @@ export function connectWebSocket(
     if (
         token === undefined || sessionId === undefined || endpoint === undefined
     ) {
+        console.log(token, sessionId, endpoint);
         return;
     }
     const ws = new WebSocket(`wss://${endpoint}?v=8`);
@@ -37,6 +38,7 @@ export function connectWebSocket(
             server_id: guildId.toString(),
             session_id: sessionId,
             token,
+            seq_ack: conn.context.wsSequence,
         },
     });
     const open = () => {
@@ -64,6 +66,7 @@ function handleOpen(
     identifyRequest: string,
     resumeRequest: string,
 ) {
+    console.log("WebSocket open");
     if (conn.ws?.readyState !== WebSocket.OPEN) {
         return;
     }
@@ -81,13 +84,19 @@ async function handleMessage(conn: ConnectionData, ev: MessageEvent<any>) {
         } else {
             ev_bin = Buffer.from(ev.data);
         }
+        conn.context.wsSequence = ev_bin.readUInt16BE(0);
         op = ev_bin.readUInt8(2);
         d = ev_bin.subarray(3);
     } else {
         const ev_json = JSON.parse(ev.data);
         op = ev_json.op;
         d = ev_json.d;
+        if (ev_json.seq) {
+            conn.context.wsSequence = ev_json.seq;
+        }
     }
+    console.log(conn.context.wsSequence);
+    console.log(op, d);
     socketHandlers[op as ReceiveVoiceOpcodes]?.(conn, d);
 }
 
@@ -100,9 +109,8 @@ function handleClose(
     clearInterval(conn.heartbeat);
     conn.context.ready = false;
     conn.context.speaking = false;
-    conn.context.lastHeart = undefined;
-    conn.context.missedHeart = 0;
-    if (VoiceCloseEventCodes.Disconnect === event.code) {
+    if (VoiceCloseEventCodes.Disconnect !== event.code) {
+        conn.context.wsSequence = -1;
         return;
     }
     if (conn.context.reconnect >= 3) {
@@ -110,7 +118,10 @@ function handleClose(
     }
     conn.context.reconnect++;
     conn.resume = true;
-    connectWebSocket(conn, userId, guildId);
+
+    setTimeout(() => {
+        connectWebSocket(conn, userId, guildId);
+    }, 500);
 }
 
 /**

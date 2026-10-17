@@ -1,6 +1,9 @@
 import { reinitDave, sendWSBinary } from "../../mod.ts";
+import { EventSource } from "../../utils/mod.ts";
 import {
     ConnectionData,
+    connectSocketToSource,
+    getBotData,
     sendWS,
     setUserSSRC,
     updateDaveVersion,
@@ -19,6 +22,7 @@ export const socketHandlers: Record<
     [ReceiveVoiceOpcodes.HeartbeatACK]: heartbeatACK,
     [ReceiveVoiceOpcodes.Hello]: hello,
     [ReceiveVoiceOpcodes.Resumed]: resumed,
+    [ReceiveVoiceOpcodes.ClientConnect]: clientConnect,
     [ReceiveVoiceOpcodes.ClientDisconnect]: clientDisconnect,
     [ReceiveVoiceOpcodes.MLS_EXTERNAL_SENDER]: mlsExternalSenderPackage,
     [ReceiveVoiceOpcodes.MLS_PROPOSALS]: mlsProposal,
@@ -35,7 +39,11 @@ function hello(conn: ConnectionData, d: { heartbeat_interval: number }) {
         clearInterval(conn.heartbeat);
     }
     conn.heartbeat = setInterval(() => {
-        beat(conn);
+        if (conn.ws?.readyState !== WebSocket.OPEN) {
+            clearInterval(conn.heartbeat);
+        } else {
+            beat(conn);
+        }
     }, d.heartbeat_interval);
     beat(conn);
 }
@@ -43,7 +51,7 @@ function hello(conn: ConnectionData, d: { heartbeat_interval: number }) {
 async function beat(conn: ConnectionData) {
     sendWS(conn, SendVoiceOpcodes.Heartbeat, {
         t: Date.now(),
-        seq_ack: conn.context.sequence,
+        seq_ack: conn.context.wsSequence,
     });
     if (conn.udpSocket && conn.remote) {
         // NAT/connection table keep-alive
@@ -56,6 +64,40 @@ async function beat(conn: ConnectionData) {
 }
 
 function ready(conn: ConnectionData, d: any) {
+    console.log("Ready!");
+    let currentPort = 5000;
+    let listening = false;
+    let udpSocket: Deno.DatagramConn | undefined;
+    while (!listening) {
+        try {
+            udpSocket = Deno.listenDatagram({
+                hostname: "0.0.0.0",
+                port: currentPort,
+                transport: "udp",
+            });
+            listening = true;
+        } catch (_err) {
+            if (_err instanceof TypeError) {
+                throw new Error(
+                    "Please enable unstable by adding --unstable.",
+                );
+            }
+            currentPort++;
+        }
+    }
+    conn.udpSocket = udpSocket as Deno.DatagramConn;
+    const udpRaw = new EventSource<Uint8Array>();
+    conn.udpRaw = udpRaw;
+
+    const botData = getBotData(conn.botId);
+    connectSocketToSource(
+        conn.channelId,
+        conn.guildId,
+        conn.udpSocket,
+        botData.udpSource,
+        conn.udpRaw,
+    );
+
     const { ssrc, port, ip } = d;
     conn.context.ssrc = ssrc;
     conn.remote = { port, hostname: ip };
@@ -114,12 +156,17 @@ function speaking(conn: ConnectionData, d: any) {
 
 function heartbeatACK(conn: ConnectionData, d: number) {
     if (conn.context.lastHeart === d) {
-        conn.context.missedHeart = 0;
         conn.context.lastHeart = undefined;
     }
 }
 
-function clientDisconnect() {}
+function clientConnect(conn: ConnectionData, d: any) {
+    d.user_ids.forEach((id: string) => conn.clientsConnected.add(id));
+}
+
+function clientDisconnect(conn: ConnectionData, d: any) {
+    conn.clientsConnected.delete(d.user_id);
+}
 
 function mlsExternalSenderPackage(conn: ConnectionData, d: Buffer) {
     conn.dave.session?.setExternalSender(d);
@@ -130,8 +177,10 @@ function mlsProposal(conn: ConnectionData, d: Buffer) {
     const { commit, welcome } = conn.dave.session!.processProposals(
         optype,
         d.subarray(1),
+        [...conn.clientsConnected],
     );
     if (commit) {
+        console.log("Commit welcome!");
         // This sends a binary message to the voice server, pretty much the same as `Buffer.concat([optype, buffer])` with optype being a uint8
         sendWSBinary(
             conn,
@@ -210,11 +259,7 @@ function davePrepareTransition(conn: ConnectionData, d: any) {
 }
 
 function daveExecutePendingTransition(conn: ConnectionData, d: any) {
-    if (!conn.dave.pending.has(d.transition_id)) {
-        return;
-    }
-    updateDaveVersion(conn, conn.dave.pending.get(d.transition_id)!);
-    conn.dave.pending.delete(d.transition_id);
+    console.log("Idk we transition to nothin :)");
 }
 
 function davePrepareEpoch(conn: ConnectionData, d: any) {

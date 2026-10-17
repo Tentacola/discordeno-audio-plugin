@@ -87,27 +87,17 @@ function createAudioHelpers<
             const conn = getConnectionData(bot.id, guildId);
             createDaveSession(bot.id, guildId, channelId);
             conn.connectInfo.sessionId = sessionId;
+            connectWebSocket(conn, bot.id, guildId);
         }
         oldStateListener?.(event);
     };
     const oldServerListener = bot.events.voiceServerUpdate;
-    let conn_timeout: number | undefined;
     bot.events.voiceServerUpdate = (event) => {
-        clearTimeout(conn_timeout);
-        conn_timeout = setTimeout(() => {
-            const { guildId, endpoint, token } = event;
-            const conn = getConnectionData(bot.id, guildId);
-            if (
-                conn.connectInfo.endpoint === endpoint &&
-                conn.connectInfo.token === token
-            ) {
-                return;
-            }
-            conn.connectInfo.endpoint = endpoint;
-            conn.connectInfo.token = token;
-            connectWebSocket(conn, bot.id, guildId);
-        }, 500);
-
+        const { guildId, endpoint, token } = event;
+        const conn = getConnectionData(bot.id, guildId);
+        conn.connectInfo.endpoint = endpoint;
+        conn.connectInfo.token = token;
+        connectWebSocket(conn, bot.id, guildId);
         oldServerListener?.(event);
     };
     return {

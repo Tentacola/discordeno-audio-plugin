@@ -55,8 +55,7 @@ export async function prepPacket(conn: ConnectionData, packet: Uint8Array) {
     const nonceView = new DataView(nonce.buffer);
     conn.context.nonce++;
     nonceView.setUint32(0, conn.context.nonce, false);
-
-    if (conn.dave.session.ready && conn.dave.session.protocolVersion !== 0) {
+    if (conn.dave.session?.ready && conn.dave.session.protocolVersion !== 0) {
         packet = conn.dave.session.encryptOpus(Buffer.from(packet));
     }
     const encrypted = await encryptPacket(packet, rtp, nonce, secret);
