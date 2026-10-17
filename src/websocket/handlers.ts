@@ -64,7 +64,6 @@ async function beat(conn: ConnectionData) {
 }
 
 function ready(conn: ConnectionData, d: any) {
-    console.log("Ready!");
     let currentPort = 5000;
     let listening = false;
     let udpSocket: Deno.DatagramConn | undefined;
@@ -180,7 +179,6 @@ function mlsProposal(conn: ConnectionData, d: Buffer) {
         [...conn.clientsConnected],
     );
     if (commit) {
-        console.log("Commit welcome!");
         // This sends a binary message to the voice server, pretty much the same as `Buffer.concat([optype, buffer])` with optype being a uint8
         sendWSBinary(
             conn,

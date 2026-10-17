@@ -17,7 +17,6 @@ export function connectWebSocket(
     if (
         token === undefined || sessionId === undefined || endpoint === undefined
     ) {
-        console.log(token, sessionId, endpoint);
         return;
     }
     const ws = new WebSocket(`wss://${endpoint}?v=8`);
@@ -66,7 +65,6 @@ function handleOpen(
     identifyRequest: string,
     resumeRequest: string,
 ) {
-    console.log("WebSocket open");
     if (conn.ws?.readyState !== WebSocket.OPEN) {
         return;
     }
@@ -95,8 +93,6 @@ async function handleMessage(conn: ConnectionData, ev: MessageEvent<any>) {
             conn.context.wsSequence = ev_json.seq;
         }
     }
-    console.log(conn.context.wsSequence);
-    console.log(op, d);
     socketHandlers[op as ReceiveVoiceOpcodes]?.(conn, d);
 }
 
